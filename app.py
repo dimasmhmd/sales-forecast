@@ -5,109 +5,163 @@ import plotly.express as px
 from src.processor import prepare_features
 from src.trainer import train_optimized_xgb
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sales Analytics Pro", layout="wide", page_icon="📊")
+# --- 1. KONFIGURASI HALAMAN ---
+st.set_page_config(
+    page_title="Sales Analytics Enterprise", 
+    layout="wide", 
+    page_icon="📈"
+)
 
-st.title("🌎 Global Sales Forecasting & Analytics")
+# Custom CSS untuk mempercantik tampilan
 st.markdown("""
-Dashboard ini mampu memproses dataset penjualan multivariat. Gunakan filter di sidebar untuk menyaring data berdasarkan kategori tertentu.
-""")
+    <style>
+    .main {
+        background-color: #f5f7f9;
+    }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    </style>
+    """, unsafe_allow_index=True)
 
-# --- SIDEBAR: UPLOAD & FILTER ---
-st.sidebar.header("📂 Data & Filter")
+st.title("🌎 Global Sales Forecasting Dashboard")
+st.markdown("Analisis prediktif multivariat menggunakan **XGBoost dengan Hyperparameter Tuning**.")
+
+# --- 2. SIDEBAR: UPLOAD & FILTER ---
+st.sidebar.header("📁 Manajemen Data")
 uploaded_file = st.sidebar.file_uploader("Unggah Dataset Penjualan (CSV)", type="csv")
 
 if uploaded_file:
-    # 1. Load Data
+    # Load Data
     df = pd.read_csv(uploaded_file)
     
-    # Identifikasi kolom tanggal otomatis
+    # Deteksi Kolom Tanggal Otomatis
     date_col = [c for c in df.columns if 'Date' in c]
     if not date_col:
-        st.error("Gagal menemukan kolom tanggal (harus mengandung kata 'Date').")
+        st.error("❌ Tidak ditemukan kolom dengan kata 'Date'. Mohon cek kembali file CSV Anda.")
         st.stop()
     
     date_col = date_col[0]
     df[date_col] = pd.to_datetime(df[date_col])
 
-    # --- FITUR FILTER DINAMIS ---
+    # --- FILTER DINAMIS ---
     st.sidebar.subheader("🎯 Filter Analisis")
     
-    # Pilih Region (Jika ada kolom Region)
+    # Filter Region
     selected_region = "All"
     if 'Region' in df.columns:
         regions = ["All"] + sorted(df['Region'].unique().tolist())
-        selected_region = st.sidebar.selectbox("Pilih Wilayah (Region)", regions)
+        selected_region = st.sidebar.selectbox("Wilayah (Region)", regions)
 
-    # Pilih Item Type (Jika ada kolom Item Type)
+    # Filter Item Type
     selected_item = "All"
     if 'Item Type' in df.columns:
         items = ["All"] + sorted(df['Item Type'].unique().tolist())
-        selected_item = st.sidebar.selectbox("Pilih Jenis Barang", items)
+        selected_item = st.sidebar.selectbox("Jenis Barang", items)
 
-    # Terapkan Filter ke DataFrame
+    # Terapkan Filter
     filtered_df = df.copy()
     if selected_region != "All":
         filtered_df = filtered_df[filtered_df['Region'] == selected_region]
     if selected_item != "All":
         filtered_df = filtered_df[filtered_df['Item Type'] == selected_item]
 
-    # Pilih Target Prediksi (Kolom Angka)
+    # Pilih Target Prediksi
     target_options = [c for c in df.columns if df[c].dtype in ['float64', 'int64']]
     default_target = 'Units Sold' if 'Units Sold' in target_options else target_options[0]
-    selected_target = st.sidebar.selectbox("Target Prediksi", target_options, index=target_options.index(default_target))
+    selected_target = st.sidebar.selectbox("Pilih Target Prediksi", target_options, index=target_options.index(default_target))
 
-    # --- TAMPILAN DATA ---
-    with st.expander("👁️ Lihat Data Terfilter"):
-        st.write(f"Menampilkan {len(filtered_df)} baris data.")
-        st.dataframe(filtered_df, use_container_width=True, height=300)
+    # --- 3. DISPLAY DATA MENTAH (EXPANDER + SCROLL) ---
+    with st.expander("👁️ Lihat Data Terfilter (Raw Data)"):
+        st.info(f"Menampilkan {len(filtered_df)} baris data berdasarkan filter.")
+        st.dataframe(filtered_df, use_container_width=True, height=350)
 
-    # --- PROSES FORECASTING ---
+    # --- 4. PROSES FORECASTING ---
     st.sidebar.markdown("---")
-    if st.sidebar.button("Jalankan Forecasting"):
-        if len(filtered_df) < 20:
-            st.warning("⚠️ Data hasil filter terlalu sedikit (minimal 20 baris) untuk membuat prediksi yang akurat.")
+    if st.sidebar.button("🚀 Jalankan Forecasting"):
+        if len(filtered_df) < 25:
+            st.warning("⚠️ Data terlalu sedikit untuk membuat prediksi. Minimal dibutuhkan 25 baris data historis.")
         else:
-            with st.spinner(f'Menganalisis tren {selected_target}...'):
+            with st.spinner('Sedang mengoptimalkan model AI...'):
                 
-                # 2. Feature Engineering (Gunakan filtered_df)
-                # Pastikan src/processor.py sudah mendukung Label Encoding seperti yang dijelaskan sebelumnya
+                # Feature Engineering
                 data_final = prepare_features(filtered_df, target_col=selected_target)
                 
+                # Split Feature & Target
                 X = data_final.drop(columns=[selected_target])
                 y = data_final[selected_target]
                 
-                # 3. Training
+                # Training & Tuning
                 model, best_params = train_optimized_xgb(X, y)
                 preds = model.predict(X)
 
-                # --- DASHBOARD HASIL ---
+                # --- 5. DASHBOARD HASIL ---
                 st.divider()
-                st.subheader(f"🚀 Analisis Prediksi: {selected_item} di {selected_region}")
+                st.subheader(f"📊 Hasil Analisis: {selected_item} ({selected_region})")
                 
-                # Metriks
+                # Metriks Utama
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Prediksi Berikutnya", f"{preds[-1]:,.0f}")
-                m2.metric("Total Data Terolah", len(y))
-                m3.metric("Rekomendasi Stok", f"{(preds[-1] * 1.15):,.0f}")
+                m2.metric("Akurasi (Estimasi)", "Tuned", help="Model telah dioptimalkan melalui Hyperparameter Tuning")
+                m3.metric("Rekomendasi Stok", f"{(preds[-1] * 1.2):,.0f}", delta="Safety Stock 20%")
 
-                # Grafik Visualisasi
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=y.index, y=y, name="Aktual", line=dict(color='#1f77b4')))
-                fig.add_trace(go.Scatter(x=y.index, y=preds, name="Prediksi Model", line=dict(color='#ff7f0e', dash='dot')))
-                fig.update_layout(title=f"Tren Historis vs Model ({selected_target})", template="plotly_white")
-                st.plotly_chart(fig, use_container_width=True)
+                # Grafik Tren Plotly
+                fig_trend = go.Figure()
+                fig_trend.add_trace(go.Scatter(x=y.index, y=y, name="Data Aktual", line=dict(color='#1f77b4', width=2.5)))
+                fig_trend.add_trace(go.Scatter(x=y.index, y=preds, name="Prediksi AI", line=dict(color='#ff7f0e', dash='dot')))
+                fig_trend.update_layout(
+                    title=f"Perbandingan Data Aktual vs Prediksi ({selected_target})",
+                    xaxis_title="Waktu",
+                    yaxis_title="Nilai",
+                    template="plotly_white",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
 
-                # --- FEATURE IMPORTANCE ---
+                # --- 6. FEATURE IMPORTANCE ---
                 st.subheader("🧠 Faktor Penentu Penjualan")
-                importance = pd.DataFrame({'Fitur': X.columns, 'Importance': model.feature_importances_})
-                importance = importance.sort_values(by='Importance', ascending=True).tail(10)
+                importance = pd.DataFrame({
+                    'Fitur': X.columns, 
+                    'Importance': model.feature_importances_
+                }).sort_values(by='Importance', ascending=True).tail(10)
                 
-                fig_imp = px.bar(importance, x='Importance', y='Fitur', orientation='h', 
-                                 title="10 Faktor Paling Berpengaruh", color='Importance',
-                                 color_continuous_scale='Viridis')
+                fig_imp = px.bar(
+                    importance, x='Importance', y='Fitur', orientation='h',
+                    title="10 Variabel Paling Berpengaruh",
+                    color='Importance', color_continuous_scale='Blues'
+                )
+                fig_imp.update_layout(template="plotly_white")
                 st.plotly_chart(fig_imp, use_container_width=True)
 
-                st.success("Analisis selesai!")
+                # --- 7. DOWNLOAD HASIL ---
+                st.divider()
+                st.subheader("📥 Unduh Hasil Prediksi")
+                
+                df_res = pd.DataFrame({
+                    'Tanggal': y.index,
+                    'Aktual': y.values,
+                    'Prediksi': preds,
+                    'Selisih': preds - y.values
+                })
+
+                @st.cache_data
+                def convert_df(df_input):
+                    return df_input.to_csv(index=False).encode('utf-8')
+
+                csv = convert_df(df_res)
+                st.download_button(
+                    label="💾 Download CSV Hasil Prediksi",
+                    data=csv,
+                    file_name=f'forecast_{selected_item}_{selected_region}.csv',
+                    mime='text/csv',
+                )
+                
+                st.success("✅ Analisis Selesai! Gunakan parameter terbaik: " + str(best_params))
+
 else:
-    st.info("👋 Silakan unggah file CSV global sales Anda untuk memulai.")
+    # Tampilan Awal (Welcome Screen)
+    st.info("👋 Selamat datang! Silakan unggah file CSV Global Sales Anda di sidebar untuk memulai.")
+    st.image("https://img.freepik.com/free-vector/data-analysis-concept-illustration_114360-1594.jpg", width=500)
