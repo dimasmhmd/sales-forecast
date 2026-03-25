@@ -9,6 +9,8 @@ def train_optimized_xgb(X, y):
         cv_folds = 2
     elif n_samples < 30:
         cv_folds = 3
+    elif n_samples < 60:
+        cv_folds = 4
     else:
         cv_folds = 5
 
