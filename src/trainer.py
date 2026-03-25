@@ -12,7 +12,14 @@ def train_optimized_xgb(X, y):
     }
     
     model = XGBRegressor(objective='reg:squarederror', random_state=42)
-    search = RandomizedSearchCV(model, param_distributions=param_grid, n_iter=3, cv=cv_folds, n_jobs=-1, random_state=42)
+    search = RandomizedSearchCV(
+        model, 
+        param_distributions=param_grid, 
+        n_iter=3, 
+        cv=cv_folds, 
+        n_jobs=-1, 
+        random_state=42
+    )
     search.fit(X, y)
     
     return search.best_estimator_, search.best_params_
