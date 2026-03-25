@@ -6,144 +6,102 @@ from src.processor import prepare_features
 from src.trainer import train_optimized_xgb
 
 # --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(
-    page_title="Sales Analytics Pro", 
-    layout="wide", 
-    page_icon="📈"
-)
+st.set_page_config(page_title="Sales Analytics Pro", layout="wide", page_icon="📈")
 
 st.title("🌎 Global Sales Forecasting Dashboard")
-st.markdown("Analisis prediktif multivariat menggunakan **XGBoost dengan Hyperparameter Tuning**.")
+st.markdown("Analisis prediktif multivariat dengan fitur **Breakdown Analysis**.")
 
 # --- 2. SIDEBAR: UPLOAD & FILTER ---
 st.sidebar.header("📁 Manajemen Data")
 uploaded_file = st.sidebar.file_uploader("Unggah Dataset Penjualan (CSV)", type="csv")
 
 if uploaded_file:
-    # Load Data
     df = pd.read_csv(uploaded_file)
-    
-    # Deteksi Kolom Tanggal Otomatis (Cari kolom yang mengandung kata 'Date')
     date_cols = [c for c in df.columns if 'Date' in c]
     if not date_cols:
-        st.error("❌ Tidak ditemukan kolom tanggal. Pastikan ada kolom dengan kata 'Date'.")
+        st.error("❌ Tidak ditemukan kolom tanggal.")
         st.stop()
     
     date_col = date_cols[0]
     df[date_col] = pd.to_datetime(df[date_col])
 
-    # --- FILTER DINAMIS ---
+    # --- FILTER SIDEBAR ---
     st.sidebar.subheader("🎯 Filter Analisis")
     
-    # Filter Region (Wilayah)
     selected_region = "All"
     if 'Region' in df.columns:
         regions = ["All"] + sorted(df['Region'].unique().tolist())
         selected_region = st.sidebar.selectbox("Wilayah (Region)", regions)
 
-    # Filter Item Type (Jenis Barang)
     selected_item = "All"
     if 'Item Type' in df.columns:
         items = ["All"] + sorted(df['Item Type'].unique().tolist())
         selected_item = st.sidebar.selectbox("Jenis Barang", items)
 
-    # Terapkan Filter ke DataFrame
-    filtered_df = df.copy()
-    if selected_region != "All":
-        filtered_df = filtered_df[filtered_df['Region'] == selected_region]
-    if selected_item != "All":
-        filtered_df = filtered_df[filtered_df['Item Type'] == selected_item]
+    # --- FITUR BARU: OPSI TAMPILAN JIKA PILIH ALL ---
+    view_mode = "Total Agregat"
+    if selected_item == "All":
+        view_mode = st.sidebar.radio("Tampilan Forecast:", ["Total Agregat", "Breakdown per Item"])
 
-    # Pilih Target Prediksi (Hanya kolom angka)
+    # Pilih Target
     target_options = [c for c in df.columns if df[c].dtype in ['float64', 'int64']]
-    default_target = 'Units Sold' if 'Units Sold' in target_options else target_options[0]
-    selected_target = st.sidebar.selectbox("Target Prediksi", target_options, index=target_options.index(default_target))
+    selected_target = st.sidebar.selectbox("Target Prediksi", target_options, index=0)
 
-    # --- 3. DISPLAY DATA MENTAH (EXPANDER) ---
-    with st.expander("👁️ Lihat Data Terfilter (Raw Data)"):
-        st.info(f"Menampilkan {len(filtered_df)} baris data.")
-        st.dataframe(filtered_df, use_container_width=True, height=350)
+    # Proses Filter Data
+    f_df = df.copy()
+    if selected_region != "All":
+        f_df = f_df[f_df['Region'] == selected_region]
+    if selected_item != "All" and view_mode == "Total Agregat":
+        f_df = f_df[f_df['Item Type'] == selected_item]
 
-    # --- 4. PROSES FORECASTING ---
+    # --- 3. PROSES FORECASTING ---
     st.sidebar.markdown("---")
     if st.sidebar.button("🚀 Jalankan Forecasting"):
-        if len(filtered_df) < 25:
-            st.warning("⚠️ Data terlalu sedikit untuk membuat prediksi (Min. 25 baris). Coba kurangi filter.")
-        else:
-            with st.spinner('Mengoptimalkan model AI...'):
-                
-                # Feature Engineering
-                data_final = prepare_features(filtered_df, target_col=selected_target)
-                
-                # Split Feature & Target
-                X = data_final.drop(columns=[selected_target])
-                y = data_final[selected_target]
-                
-                # Training & Tuning
-                model, best_params = train_optimized_xgb(X, y)
+        
+        if view_mode == "Total Agregat":
+            # LOGIKA 1: PREDIKSI TOTAL (Sama seperti sebelumnya)
+            # Agregasi data berdasarkan tanggal jika ada duplikasi (misal beda negara di tanggal sama)
+            f_df_agg = f_df.groupby(date_col)[selected_target].sum().reset_index()
+            
+            with st.spinner('Mengoptimalkan model untuk data agregat...'):
+                data_final = prepare_features(f_df_agg, target_col=selected_target)
+                X, y = data_final.drop(columns=[selected_target]), data_final[selected_target]
+                model, _ = train_optimized_xgb(X, y)
                 preds = model.predict(X)
 
-                # --- 5. DASHBOARD HASIL ---
-                st.divider()
-                st.subheader(f"📊 Hasil Analisis: {selected_item} ({selected_region})")
+                # Visualisasi
+                st.subheader(f"📊 Forecast Total {selected_target}")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=y.index, y=y, name="Aktual", line=dict(color='#1f77b4')))
+                fig.add_trace(go.Scatter(x=y.index, y=preds, name="Prediksi", line=dict(color='#ff7f0e', dash='dot')))
+                st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            # LOGIKA 2: BREAKDOWN PER ITEM
+            st.subheader(f"📊 Perbandingan Forecast per Jenis Barang ({selected_region})")
+            fig_breakdown = go.Figure()
+            
+            # Ambil 5 item teratas saja agar grafik tidak penuh (opsional)
+            top_items = f_df['Item Type'].unique()[:5] 
+            
+            progress_bar = st.progress(0)
+            for i, item in enumerate(top_items):
+                item_df = f_df[f_df['Item Type'] == item].groupby(date_col)[selected_target].sum().reset_index()
                 
-                # Metriks Utama
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Prediksi Berikutnya", f"{preds[-1]:,.0f}")
-                m2.metric("Total Data Terolah", len(y))
-                m3.metric("Rekomendasi Stok", f"{(preds[-1] * 1.2):,.0f}", delta="Safety Stock 20%")
-
-                # Grafik Tren Plotly
-                fig_trend = go.Figure()
-                fig_trend.add_trace(go.Scatter(x=y.index, y=y, name="Data Aktual", line=dict(color='#1f77b4', width=2.5)))
-                fig_trend.add_trace(go.Scatter(x=y.index, y=preds, name="Prediksi AI", line=dict(color='#ff7f0e', dash='dot')))
-                fig_trend.update_layout(
-                    title=f"Tren {selected_target} Over Time",
-                    xaxis_title="Waktu",
-                    yaxis_title="Nilai",
-                    template="plotly_white",
-                    hovermode="x unified"
-                )
-                st.plotly_chart(fig_trend, use_container_width=True)
-
-                # --- 6. FEATURE IMPORTANCE ---
-                st.subheader("🧠 Faktor Penentu Penjualan")
-                importance = pd.DataFrame({
-                    'Fitur': X.columns, 
-                    'Importance': model.feature_importances_
-                }).sort_values(by='Importance', ascending=True).tail(10)
+                if len(item_df) > 20:
+                    data_f = prepare_features(item_df, target_col=selected_target)
+                    X_i, y_i = data_f.drop(columns=[selected_target]), data_f[selected_target]
+                    model_i, _ = train_optimized_xgb(X_i, y_i)
+                    preds_i = model_i.predict(X_i)
+                    
+                    # Tambahkan ke grafik yang sama
+                    fig_breakdown.add_trace(go.Scatter(x=y_i.index, y=preds_i, name=f"Prediksi {item}"))
                 
-                fig_imp = px.bar(
-                    importance, x='Importance', y='Fitur', orientation='h',
-                    title="10 Variabel Paling Berpengaruh",
-                    color='Importance', color_continuous_scale='Blues'
-                )
-                st.plotly_chart(fig_imp, use_container_width=True)
-
-                # --- 7. DOWNLOAD HASIL ---
-                st.divider()
-                st.subheader("📥 Unduh Hasil Prediksi")
-                
-                df_res = pd.DataFrame({
-                    'Tanggal': y.index,
-                    'Aktual': y.values,
-                    'Prediksi': preds,
-                    'Selisih': preds - y.values
-                })
-
-                @st.cache_data
-                def convert_df(df_input):
-                    return df_input.to_csv(index=False).encode('utf-8')
-
-                csv = convert_df(df_res)
-                st.download_button(
-                    label="💾 Download CSV Hasil Prediksi",
-                    data=csv,
-                    file_name=f'forecast_{selected_item}_{selected_region}.csv',
-                    mime='text/csv',
-                )
-                
-                st.success(f"Analisis Selesai! Model menggunakan parameter: {best_params}")
+                progress_bar.progress((i + 1) / len(top_items))
+            
+            fig_breakdown.update_layout(title="Breakdown Prediksi per Kategori Produk", template="plotly_white")
+            st.plotly_chart(fig_breakdown, use_container_width=True)
+            st.success("Analisis Breakdown Selesai!")
 
 else:
-    st.info("👋 Silakan unggah file CSV Global Sales Anda di sidebar untuk memulai.")
+    st.info("👋 Silakan unggah file CSV Global Sales Anda di sidebar.")
