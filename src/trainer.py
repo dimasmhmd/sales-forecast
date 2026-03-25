@@ -24,7 +24,7 @@ def train_optimized_xgb(X, y):
     search = RandomizedSearchCV(
         model, 
         param_distributions=param_grid, 
-        n_iter=5, # Kurangi iterasi untuk testing cepat
+        n_iter=10, # Kurangi iterasi untuk testing cepat
         cv=cv_folds, 
         scoring='neg_mean_absolute_error', 
         n_jobs=-1,
